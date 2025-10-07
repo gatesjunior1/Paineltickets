@@ -1,642 +1,338 @@
-import React, { useMemo, useState, useEffect } from "react";
-import { motion } from "framer-motion";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CalendarDays, Filter, Plus, Download, Search, AlarmClock, Users, BarChart3, Moon, SunMedium, LayoutList, KanbanSquare, RefreshCcw } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  Legend,
-} from "recharts";
-
-// ---------- Types ----------
-type Priority = "Baixa" | "Média" | "Alta" | "Crítica";
-type Status = "Novo" | "Em andamento" | "Aguardando" | "Resolvido" | "Fechado";
-
-type Ticket = {
-  id: string;
-  titulo: string;
-  solicitante: string;
-  responsavel?: string;
-  prioridade: Priority;
-  status: Status;
-  criadoEm: string; // ISO
-  venceEm?: string; // ISO - SLA due
-  canal: "Email" | "Telefone" | "Portal" | "WhatsApp" | "Integração";
-  tags: string[];
-  ultimaAtualizacao: string; // ISO
-};
-
-// ---------- Mock Data (pode conectar a API depois) ----------
-const now = new Date();
-const daysAgo = (d: number) => new Date(now.getTime() - d * 24 * 60 * 60 * 1000).toISOString();
-const daysFromNow = (d: number) => new Date(now.getTime() + d * 24 * 60 * 60 * 1000).toISOString();
-
-const MOCK_TICKETS: Ticket[] = [
-  {
-    id: "NT-3241",
-    titulo: "Erro ao imprimir etiquetas na UBS Santa Rita",
-    solicitante: "Leidiane",
-    responsavel: "Yasmin",
-    prioridade: "Alta",
-    status: "Em andamento",
-    criadoEm: daysAgo(2),
-    venceEm: daysFromNow(1),
-    canal: "Portal",
-    tags: ["impressora", "UBS"],
-    ultimaAtualizacao: daysAgo(0.2),
-  },
-  {
-    id: "NT-3239",
-    titulo: "Integração PEC indisponível (timeout)",
-    solicitante: "Marcelo",
-    responsavel: "Rafael",
-    prioridade: "Crítica",
-    status: "Aguardando",
-    criadoEm: daysAgo(1),
-    venceEm: daysFromNow(-0.2),
-    canal: "Integração",
-    tags: ["PEC", "APISUS"],
-    ultimaAtualizacao: daysAgo(0.4),
-  },
-  {
-    id: "NT-3221",
-    titulo: "Atualizar cadastro de usuários – Policlínica Itatuba",
-    solicitante: "Barbara",
-    responsavel: "Luciana",
-    prioridade: "Média",
-    status: "Novo",
-    criadoEm: daysAgo(0.5),
-    venceEm: daysFromNow(3),
-    canal: "Portal",
-    tags: ["cadastro", "policlínica"],
-    ultimaAtualizacao: daysAgo(0.3),
-  },
-  {
-    id: "NT-3212",
-    titulo: "Falha no login do AtendSaúde (ACS)",
-    solicitante: "Raquel Nascimento",
-    responsavel: "Josinaldo",
-    prioridade: "Alta",
-    status: "Em andamento",
-    criadoEm: daysAgo(3),
-    venceEm: daysFromNow(0.3),
-    canal: "WhatsApp",
-    tags: ["AtendSaúde", "login"],
-    ultimaAtualizacao: daysAgo(0.7),
-  },
-  {
-    id: "NT-3202",
-    titulo: "Treinamento PEC – agenda nova Secretaria Viçosa",
-    solicitante: "Secretaria de Saúde Viçosa",
-    responsavel: "Maclaud",
-    prioridade: "Baixa",
-    status: "Aguardando",
-    criadoEm: daysAgo(5),
-    venceEm: daysFromNow(5),
-    canal: "Email",
-    tags: ["treinamento", "agenda"],
-    ultimaAtualizacao: daysAgo(2),
-  },
-  {
-    id: "NT-3195",
-    titulo: "GLPI – criação de filas por município",
-    solicitante: "Alan Casemiro",
-    responsavel: "Tiago",
-    prioridade: "Média",
-    status: "Resolvido",
-    criadoEm: daysAgo(7),
-    venceEm: daysFromNow(-1),
-    canal: "Portal",
-    tags: ["GLPI", "config"],
-    ultimaAtualizacao: daysAgo(1.5),
-  },
-];
-
-// ---------- Helpers ----------
-function classNames(...c: Array<string | false | undefined>) {
-  return c.filter(Boolean).join(" ");
-}
-
-function formatDate(iso?: string) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function isOverdue(t: Ticket) {
-  if (!t.venceEm) return false;
-  const due = new Date(t.venceEm).getTime();
-  return due < Date.now() && !["Resolvido", "Fechado"].includes(t.status);
-}
-
-function hoursToDue(t: Ticket) {
-  if (!t.venceEm) return Infinity;
-  return (new Date(t.venceEm).getTime() - Date.now()) / (1000 * 60 * 60);
-}
-
-// ---------- Export CSV ----------
-function exportTicketsToCSV(tickets: Ticket[]) {
-  const header = [
-    "ID",
-    "Título",
-    "Solicitante",
-    "Responsável",
-    "Prioridade",
-    "Status",
-    "Criado em",
-    "Vence em",
-    "Canal",
-    "Tags",
-    "Última atualização",
-  ];
-  const rows = tickets.map((t) => [
-    t.id,
-    t.titulo,
-    t.solicitante,
-    t.responsavel ?? "",
-    t.prioridade,
-    t.status,
-    new Date(t.criadoEm).toISOString(),
-    t.venceEm ? new Date(t.venceEm).toISOString() : "",
-    t.canal,
-    t.tags.join("|"),
-    new Date(t.ultimaAtualizacao).toISOString(),
-  ]);
-  const csv = [header, ...rows]
-    .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
-    .join("\n");
-  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `tickets_novetech_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// ---------- Dark Mode (local) ----------
-function useLocalDarkMode() {
-  const [dark, setDark] = useState<boolean>(false);
-  useEffect(() => {
-    const cls = document.documentElement.classList;
-    if (dark) cls.add("dark");
-    else cls.remove("dark");
-  }, [dark]);
-  return { dark, setDark };
-}
-
-// ---------- Main Component ----------
-export default function TicketOpsDashboard() {
-  const [tickets, setTickets] = useState<Ticket[]>(MOCK_TICKETS);
-  const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState<Status[]>(["Novo", "Em andamento", "Aguardando"]);
-  const [priorityFilter, setPriorityFilter] = useState<Priority | "Todas">("Todas");
-  const [responsavelFilter, setResponsavelFilter] = useState<string>("");
-  const [view, setView] = useState<"tabela" | "kanban" | "analytics">("tabela");
-  const { dark, setDark } = useLocalDarkMode();
-
-  const filtered = useMemo(() => {
-    return tickets.filter((t) => {
-      const matchesText = [t.id, t.titulo, t.solicitante, t.responsavel, t.tags.join(" ")]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(q.toLowerCase());
-      const matchesStatus = statusFilter.includes(t.status);
-      const matchesPriority = priorityFilter === "Todas" ? true : t.prioridade === priorityFilter;
-      const matchesResp = responsavelFilter ? (t.responsavel || "").toLowerCase().includes(responsavelFilter.toLowerCase()) : true;
-      return matchesText && matchesStatus && matchesPriority && matchesResp;
-    });
-  }, [tickets, q, statusFilter, priorityFilter, responsavelFilter]);
-
-  const kpis = useMemo(() => {
-    const abertos = tickets.filter((t) => ["Novo", "Em andamento", "Aguardando"].includes(t.status));
-    const overdue = tickets.filter((t) => isOverdue(t));
-    const criticos = tickets.filter((t) => t.prioridade === "Crítica" && ["Novo", "Em andamento", "Aguardando"].includes(t.status));
-    const slaPrazo = tickets.filter((t) => !isOverdue(t) && ["Novo", "Em andamento", "Aguardando"].includes(t.status));
-    const slaPct = abertos.length ? Math.round((slaPrazo.length / abertos.length) * 100) : 100;
-    return {
-      totalAbertos: abertos.length,
-      vencidos: overdue.length,
-      criticos: criticos.length,
-      slaPct,
-    };
-  }, [tickets]);
-
-  const analyticsData = useMemo(() => {
-    const byStatus: Record<Status, number> = { "Novo": 0, "Em andamento": 0, "Aguardando": 0, "Resolvido": 0, "Fechado": 0 };
-    tickets.forEach((t) => (byStatus[t.status]++));
-    const chart1 = Object.entries(byStatus).map(([status, count]) => ({ status, count }));
-
-    // Série temporal fake: ultimos 8 dias – tickets vencidos x dentro do prazo
-    const days = Array.from({ length: 8 }).map((_, i) => {
-      const label = new Date(now.getTime() - (7 - i) * 24 * 3600 * 1000).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-      const vencidos = Math.max(0, Math.round(Math.random() * 3 - (i === 7 ? 1 : 0)));
-      const noPrazo = Math.max(0, Math.round(Math.random() * 5 + (i === 7 ? 2 : 0)));
-      return { dia: label, vencidos, noPrazo };
-    });
-
-    return { chart1, days };
-  }, [tickets]);
-
-  function toggleStatus(s: Status) {
-    setStatusFilter((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
-  }
-
-  function priorityBadge(p: Priority) {
-    const map: Record<Priority, string> = {
-      Baixa: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-200",
-      Média: "bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-200",
-      Alta: "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-200",
-      Crítica: "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200",
-    };
-    return <Badge className={classNames("px-2 py-1 rounded-full text-xs", map[p])}>{p}</Badge>;
-  }
-
-  function slaBadge(t: Ticket) {
-    const overdue = isOverdue(t);
-    const hours = hoursToDue(t);
-    const label = overdue ? "SLA Vencido" : isFinite(hours) ? `${Math.round(hours)}h restantes` : "—";
-    const cls = overdue
-      ? "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-200"
-      : "bg-lime-100 text-lime-700 dark:bg-lime-900/50 dark:text-lime-200";
-    return (
-      <span className={classNames("text-xs px-2 py-1 rounded-full whitespace-nowrap", cls)}>
-        <AlarmClock className="inline h-3 w-3 mr-1" /> {label}
-      </span>
-    );
-  }
-
-  // Simples criação local de ticket (mock)
-  function createTicketLocally(form: FormData) {
-    const novo: Ticket = {
-      id: `NT-${Math.floor(Math.random() * 9000 + 1000)}`,
-      titulo: String(form.get("titulo") || "Novo ticket"),
-      solicitante: String(form.get("solicitante") || ""),
-      responsavel: String(form.get("responsavel") || ""),
-      prioridade: (String(form.get("prioridade")) as Priority) || "Média",
-      status: "Novo",
-      criadoEm: new Date().toISOString(),
-      venceEm: String(form.get("venceEm")) || daysFromNow(2),
-      canal: (String(form.get("canal")) as Ticket["canal"]) || "Portal",
-      tags: String(form.get("tags") || "").split(",").map((t) => t.trim()).filter(Boolean),
-      ultimaAtualizacao: new Date().toISOString(),
-    };
-    setTickets((prev) => [novo, ...prev]);
-  }
-
-  return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 text-slate-900 dark:text-slate-100">
-      <div className="mx-auto max-w-7xl p-4 md:p-8">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">Painel de Tickets · <span className="font-extrabold">Novetech</span></h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Visão operacional com SLA, prioridade e analytics em tempo real.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="secondary" className="gap-2" onClick={() => exportTicketsToCSV(filtered)}>
-              <Download className="h-4 w-4" /> Exportar CSV
-            </Button>
-            <Button variant="outline" className="gap-2" onClick={() => window.location.reload()}>
-              <RefreshCcw className="h-4 w-4" /> Atualizar
-            </Button>
-            <Button variant="outline" className="gap-2" onClick={() => setDark(!dark)}>
-              {dark ? <SunMedium className="h-4 w-4" /> : <Moon className="h-4 w-4" />} Tema
-            </Button>
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button className="gap-2">
-                  <Plus className="h-4 w-4" /> Novo Ticket
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-xl">
-                <DialogHeader>
-                  <DialogTitle>Criar ticket</DialogTitle>
-                </DialogHeader>
-                <form
-                  className="grid grid-cols-1 md:grid-cols-2 gap-4"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    createTicketLocally(new FormData(e.currentTarget as HTMLFormElement));
-                    (document.querySelector("[data-state='open'] button[aria-label='Close']") as HTMLButtonElement)?.click();
-                  }}
-                >
-                  <div className="md:col-span-2">
-                    <Label>Título</Label>
-                    <Input name="titulo" placeholder="Descreva rapidamente o problema" required />
-                  </div>
-                  <div>
-                    <Label>Solicitante</Label>
-                    <Input name="solicitante" placeholder="Nome do solicitante" />
-                  </div>
-                  <div>
-                    <Label>Responsável</Label>
-                    <Input name="responsavel" placeholder="Atribuir a" />
-                  </div>
-                  <div>
-                    <Label>Prioridade</Label>
-                    <Select name="prioridade" defaultValue="Média">
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecione" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Baixa">Baixa</SelectItem>
-                        <SelectItem value="Média">Média</SelectItem>
-                        <SelectItem value="Alta">Alta</SelectItem>
-                        <SelectItem value="Crítica">Crítica</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Canal</Label>
-                    <Select name="canal" defaultValue="Portal">
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecione" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Portal">Portal</SelectItem>
-                        <SelectItem value="Email">Email</SelectItem>
-                        <SelectItem value="Telefone">Telefone</SelectItem>
-                        <SelectItem value="WhatsApp">WhatsApp</SelectItem>
-                        <SelectItem value="Integração">Integração</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Vence em</Label>
-                    <Input name="venceEm" type="datetime-local" />
-                  </div>
-                  <div className="md:col-span-2">
-                    <Label>Tags (separadas por vírgula)</Label>
-                    <Input name="tags" placeholder="ex.: impressora, UBS" />
-                  </div>
-                  <div className="md:col-span-2">
-                    <Button type="submit" className="w-full">Salvar</Button>
-                  </div>
-                </form>
-              </DialogContent>
-            </Dialog>
-          </div>
-        </div>
-
-        {/* KPIs */}
-        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[{
-            label: "Abertos",
-            value: kpis.totalAbertos,
-            icon: LayoutList,
-          }, {
-            label: "Vencidos",
-            value: kpis.vencidos,
-            icon: AlarmClock,
-          }, {
-            label: "Críticos",
-            value: kpis.criticos,
-            icon: Users,
-          }, {
-            label: "SLA no prazo",
-            value: kpis.slaPct + "%",
-            icon: BarChart3,
-          }].map((k, idx) => (
-            <motion.div key={k.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 * idx }}>
-              <Card className="shadow-sm">
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-slate-500 dark:text-slate-400">{k.label}</CardTitle>
-                  <k.icon className="h-4 w-4" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">{k.value}</div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Filtros */}
-        <Card className="mt-6">
-          <CardContent className="p-4 flex flex-col md:flex-row md:items-center gap-3">
-            <div className="relative md:w-72">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por ID, título, solicitante, tag…" className="pl-9" />
-            </div>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="gap-2"><Filter className="h-4 w-4" /> Status</Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-56">
-                <DropdownMenuLabel>Exibir status</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {(["Novo","Em andamento","Aguardando","Resolvido","Fechado"] as Status[]).map((s) => (
-                  <DropdownMenuCheckboxItem key={s} checked={statusFilter.includes(s)} onCheckedChange={() => toggleStatus(s)}>
-                    {s}
-                  </DropdownMenuCheckboxItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <div className="flex items-center gap-2">
-              <Label className="text-xs text-slate-500">Prioridade</Label>
-              <Select value={priorityFilter} onValueChange={(v) => setPriorityFilter(v as any)}>
-                <SelectTrigger className="w-36"><SelectValue placeholder="Todas" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Todas">Todas</SelectItem>
-                  <SelectItem value="Baixa">Baixa</SelectItem>
-                  <SelectItem value="Média">Média</SelectItem>
-                  <SelectItem value="Alta">Alta</SelectItem>
-                  <SelectItem value="Crítica">Crítica</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Label className="text-xs text-slate-500">Responsável</Label>
-              <Input value={responsavelFilter} onChange={(e) => setResponsavelFilter(e.target.value)} placeholder="Filtrar por responsável" className="w-48" />
-            </div>
-
-            <div className="ml-auto">
-              <Tabs value={view} onValueChange={(v) => setView(v as any)}>
-                <TabsList>
-                  <TabsTrigger value="tabela" className="gap-1"><LayoutList className="h-4 w-4" /> Tabela</TabsTrigger>
-                  <TabsTrigger value="kanban" className="gap-1"><KanbanSquare className="h-4 w-4" /> Kanban</TabsTrigger>
-                  <TabsTrigger value="analytics" className="gap-1"><BarChart3 className="h-4 w-4" /> Analytics</TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Views */}
-        <div className="mt-6">
-          {view === "tabela" && (
-            <Card>
-              <CardContent className="p-0 overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>ID</TableHead>
-                      <TableHead>Título</TableHead>
-                      <TableHead>Prioridade</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Responsável</TableHead>
-                      <TableHead><div className="flex items-center gap-1"><CalendarDays className="h-4 w-4" /> Criado</div></TableHead>
-                      <TableHead>Vence</TableHead>
-                      <TableHead>SLA</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.map((t) => (
-                      <TableRow key={t.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/50">
-                        <TableCell className="font-medium">{t.id}</TableCell>
-                        <TableCell>
-                          <div className="font-medium">{t.titulo}</div>
-                          <div className="text-xs text-slate-500">{t.solicitante} · {t.canal} · {t.tags.map((tg) => <Badge key={tg} variant="secondary" className="mr-1">{tg}</Badge>)}</div>
-                        </TableCell>
-                        <TableCell>{priorityBadge(t.prioridade)}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="rounded-full text-xs">{t.status}</Badge>
-                        </TableCell>
-                        <TableCell>{t.responsavel ?? "—"}</TableCell>
-                        <TableCell>{formatDate(t.criadoEm)}</TableCell>
-                        <TableCell className={classNames(isOverdue(t) && "text-rose-600 dark:text-rose-300 font-semibold")}>{formatDate(t.venceEm)}</TableCell>
-                        <TableCell>{slaBadge(t)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          )}
-
-          {view === "kanban" && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {(["Novo","Em andamento","Aguardando"] as Status[]).map((col) => (
-                <Card key={col} className="border-dashed">
-                  <CardHeader>
-                    <CardTitle className="text-base flex items-center justify-between">
-                      <span>{col}</span>
-                      <Badge variant="secondary">{filtered.filter((t) => t.status === col).length}</Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {filtered.filter((t) => t.status === col).map((t) => (
-                      <motion.div key={t.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-                        <div className={classNames("rounded-2xl p-3 bg-white dark:bg-slate-900 shadow-sm border", isOverdue(t) && "border-rose-300 dark:border-rose-700")}> 
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <div className="font-medium leading-tight">{t.titulo}</div>
-                              <div className="text-xs text-slate-500 mt-1">{t.id} · {t.solicitante}</div>
-                            </div>
-                            {priorityBadge(t.prioridade)}
-                          </div>
-                          <div className="mt-2 flex items-center justify-between text-xs">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="rounded-full">{t.responsavel ?? "—"}</Badge>
-                              {slaBadge(t)}
-                            </div>
-                            <span className="text-slate-400">{formatDate(t.ultimaAtualizacao)}</span>
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-
-          {view === "analytics" && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Tickets por status</CardTitle>
-                </CardHeader>
-                <CardContent className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={analyticsData.chart1}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="status" />
-                      <YAxis allowDecimals={false} />
-                      <Tooltip />
-                      <Legend />
-                      <Bar dataKey="count" name="Qtde" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">SLA: Vencidos × No prazo (últimos dias)</CardTitle>
-                </CardHeader>
-                <CardContent className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={analyticsData.days}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="dia" />
-                      <YAxis allowDecimals={false} />
-                      <Tooltip />
-                      <Legend />
-                      <Line type="monotone" dataKey="vencidos" name="Vencidos" />
-                      <Line type="monotone" dataKey="noPrazo" name="No prazo" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-        </div>
-
-        {/* Rodapé */}
-        <div className="text-xs text-slate-400 mt-6 text-center">
-          © {new Date().getFullYear()} Novetech · Painel de Tickets — feito com Tailwind, shadcn/ui, Recharts e Framer Motion.
+<!doctype html>
+<html lang="pt-BR" class="scroll-smooth">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Painel de Tickets • Novetech</title>
+  <!-- Tailwind via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {},
+          boxShadow: { card: "0 2px 20px -4px rgba(0,0,0,.08)" }
+        }
+      },
+      darkMode: 'media'
+    }
+  </script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Chart.js for charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    .glass { backdrop-filter: blur(8px); background: rgba(255,255,255,.7); }
+    @media (prefers-color-scheme: dark){ .glass{ background: rgba(24,24,27,.6);} }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-b from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900 text-zinc-900 dark:text-zinc-50">
+  <!-- Topbar -->
+  <header class="sticky top-0 z-10 glass border-b border-zinc-200/70 dark:border-zinc-800/70">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 font-semibold">NT</span>
+        <div>
+          <h1 class="text-base font-semibold leading-tight">Painel de Tickets</h1>
+          <p class="text-xs text-zinc-500 -mt-0.5">Novetech • exemplo front‑end (HTML)</p>
         </div>
       </div>
+      <div class="flex items-center gap-2">
+        <button class="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800">
+          <i data-lucide="settings" class="w-4 h-4"></i> Preferências
+        </button>
+        <button class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 text-sm shadow">
+          <i data-lucide="plus" class="w-4 h-4"></i> Novo Ticket
+        </button>
+      </div>
     </div>
-  );
-}
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-4">
+    <!-- KPIs -->
+    <section id="kpis" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"></section>
+
+    <!-- Toolbar header -->
+    <section class="flex items-center justify-between">
+      <div class="flex items-center gap-2 text-sm text-zinc-500">
+        <i data-lucide="filter" class="w-4 h-4"></i> Filtros
+      </div>
+      <div id="teamSummary" class="text-xs text-zinc-400">Equipe ativa: 0 <i data-lucide="users" class="inline w-3 h-3 ml-1"></i></div>
+    </section>
+
+    <!-- Toolbar -->
+    <section class="glass rounded-2xl p-4 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+        <div class="md:col-span-4 flex items-center gap-2">
+          <div class="relative flex-1">
+            <i data-lucide="search" class="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-zinc-400"></i>
+            <input id="q" placeholder="Buscar por título, ID, responsável..." class="w-full pl-8 pr-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-300 dark:focus:ring-zinc-700" />
+          </div>
+        </div>
+        <div class="md:col-span-6 grid grid-cols-2 md:grid-cols-4 gap-2">
+          <select id="fStatus" class="px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-sm">
+            <option value="">Status</option>
+            <option>Aberto</option>
+            <option>Em Progresso</option>
+            <option>Resolvido</option>
+          </select>
+          <select id="fPriority" class="px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-sm">
+            <option value="">Prioridade</option>
+            <option>Crítica</option>
+            <option>Alta</option>
+            <option>Média</option>
+            <option>Baixa</option>
+          </select>
+          <input id="fStart" type="date" class="px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-sm" />
+          <input id="fEnd" type="date" class="px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-sm" />
+        </div>
+        <div class="md:col-span-2 flex justify-end gap-2">
+          <button id="btnExport" class="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-sm">
+            <i data-lucide="download" class="w-4 h-4"></i> Exportar CSV
+          </button>
+          <button id="btnReset" class="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-sm">
+            <i data-lucide="refresh-cw" class="w-4 h-4"></i> Limpar
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Charts -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="glass rounded-2xl p-4 border border-zinc-200 dark:border-zinc-800">
+        <h3 class="text-sm font-semibold mb-2">Tickets por Status</h3>
+        <canvas id="chartStatus" height="230"></canvas>
+      </div>
+      <div class="glass rounded-2xl p-4 border border-zinc-200 dark:border-zinc-800">
+        <h3 class="text-sm font-semibold mb-2">Abertos x Resolvidos (por dia)</h3>
+        <canvas id="chartDay" height="230"></canvas>
+      </div>
+    </section>
+
+    <!-- Table -->
+    <section class="glass rounded-2xl p-3 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm" id="tbl">
+          <thead>
+            <tr class="text-left text-zinc-500 border-b border-zinc-200 dark:border-zinc-800">
+              <th class="py-3 px-3">Ticket</th>
+              <th class="py-3 px-3">Título</th>
+              <th class="py-3 px-3">Status</th>
+              <th class="py-3 px-3">Prioridade</th>
+              <th class="py-3 px-3">Responsável</th>
+              <th class="py-3 px-3">Canal</th>
+              <th class="py-3 px-3">Criado</th>
+              <th class="py-3 px-3">Atualizado</th>
+              <th class="py-3 px-3">SLA (h)</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="flex justify-between items-center px-3 py-3">
+        <p id="pagingText" class="text-xs text-zinc-500"></p>
+        <div class="flex items-center gap-2">
+          <button id="prev" class="px-3 py-1.5 rounded-lg border text-sm disabled:opacity-40">Anterior</button>
+          <span id="pageInfo" class="text-xs text-zinc-500">1/1</span>
+          <button id="next" class="px-3 py-1.5 rounded-lg border text-sm disabled:opacity-40">Próxima</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="py-6 text-center text-xs text-zinc-400">
+      Construído em HTML + Tailwind + Chart.js + Lucide. Substitua o mock por sua API ✨
+    </footer>
+  </main>
+
+  <script>
+    // ===== Mock de dados (substitua por fetch da sua API) =====
+    const seedTickets = [
+      { id: "NT-1001", title: "Erro 500 ao salvar formulário", status: "Aberto", priority: "Alta", assignee: "Yasmin", createdAt: "2025-10-01", updatedAt: "2025-10-03", slaHours: 48, timeToFirstResponseHrs: 2, tags: ["PEC", "Infra"], channel: "Email" },
+      { id: "NT-1002", title: "Impressora da UBS Tibau sem conexão", status: "Em Progresso", priority: "Média", assignee: "Luan", createdAt: "2025-10-02", updatedAt: "2025-10-04", slaHours: 72, timeToFirstResponseHrs: 1, tags: ["Hardware"], channel: "Telefone" },
+      { id: "NT-1003", title: "Cadastro duplicado em Santa Rita", status: "Aberto", priority: "Alta", assignee: "Raquel", createdAt: "2025-10-04", updatedAt: "2025-10-05", slaHours: 24, timeToFirstResponseHrs: 0.5, tags: ["PEC", "Dados"], channel: "Portal" },
+      { id: "NT-1004", title: "App AtendSaúde não sincroniza", status: "Resolvido", priority: "Alta", assignee: "Josinaldo", createdAt: "2025-10-03", updatedAt: "2025-10-06", slaHours: 48, timeToFirstResponseHrs: 0.8, tags: ["Mobile", "AtendSaúde"], channel: "Portal" },
+      { id: "NT-1005", title: "Queda intermitente no servidor", status: "Aberto", priority: "Crítica", assignee: "Marcelo", createdAt: "2025-10-05", updatedAt: "2025-10-07", slaHours: 12, timeToFirstResponseHrs: 0.2, tags: ["Infra"], channel: "Monitoramento" },
+      { id: "NT-1006", title: "Dúvida sobre Portaria 3493 no PEC", status: "Resolvido", priority: "Baixa", assignee: "Tiago", createdAt: "2025-10-01", updatedAt: "2025-10-02", slaHours: 96, timeToFirstResponseHrs: 3, tags: ["Regulatório"], channel: "Email" },
+      { id: "NT-1007", title: "Lentidão no módulo de prescrições", status: "Em Progresso", priority: "Média", assignee: "Yasmin", createdAt: "2025-10-06", updatedAt: "2025-10-07", slaHours: 72, timeToFirstResponseHrs: 1.5, tags: ["Performance"], channel: "Portal" },
+      { id: "NT-1008", title: "Integração com BI falhando", status: "Aberto", priority: "Alta", assignee: "Luan", createdAt: "2025-10-07", updatedAt: "2025-10-07", slaHours: 24, timeToFirstResponseHrs: 0.3, tags: ["BI", "API"], channel: "Webhook" },
+    ];
+
+    // ===== Estado =====
+    let tickets = [...seedTickets];
+    let query = '';
+    const filters = { status: '', priority: '', startDate: '', endDate: '' };
+    let page = 1; const pageSize = 6;
+
+    // ===== Helpers =====
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+    const unique = (arr) => Array.from(new Set(arr));
+
+    const statusClass = (st) => ({
+      'Aberto': 'bg-amber-100 text-amber-800 border-amber-200',
+      'Em Progresso': 'bg-blue-100 text-blue-800 border-blue-200',
+      'Resolvido': 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    })[st] || '';
+
+    const priorityClass = (p) => ({
+      'Crítica': 'bg-red-100 text-red-800 border-red-200',
+      'Alta': 'bg-orange-100 text-orange-800 border-orange-200',
+      'Média': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+      'Baixa': 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    })[p] || '';
+
+    function applyFilters(){
+      const q = query.toLowerCase();
+      return tickets.filter(t => {
+        const matchQ = !q || [t.id,t.title,t.assignee,t.channel,...(t.tags||[])].join(' ').toLowerCase().includes(q);
+        const matchS = !filters.status || t.status === filters.status;
+        const matchP = !filters.priority || t.priority === filters.priority;
+        const matchD1 = !filters.startDate || t.createdAt >= filters.startDate;
+        const matchD2 = !filters.endDate || t.createdAt <= filters.endDate;
+        return matchQ && matchS && matchP && matchD1 && matchD2;
+      });
+    }
+
+    function kpiData(rows){
+      const total = rows.length;
+      const abertos = rows.filter(t => t.status !== 'Resolvido').length;
+      const resolvidos = rows.filter(t => t.status === 'Resolvido').length;
+      const slaOK = rows.filter(t => t.timeToFirstResponseHrs <= 4).length; // exemplo
+      const equipes = unique(rows.map(t=>t.assignee)).length;
+      return { total, abertos, resolvidos, slaOK, equipes };
+    }
+
+    function renderKPIs(rows){
+      const { total, abertos, resolvidos, slaOK } = kpiData(rows);
+      const tpl = (title, value, subtitle, icon) => `
+        <div class="glass border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm hover:shadow-md transition">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-zinc-500">${title}</p>
+              <p class="mt-1 text-2xl font-semibold tracking-tight">${value}</p>
+              ${subtitle?`<p class="mt-2 text-xs text-zinc-400">${subtitle}</p>`:''}
+            </div>
+            <i data-lucide="${icon}" class="w-6 h-6 text-zinc-400"></i>
+          </div>
+        </div>`;
+      $('#kpis').innerHTML = [
+        tpl('Tickets', total, 'Total filtrado', 'tag'),
+        tpl('Em aberto', abertos, 'Aguardando solução', 'alert-triangle'),
+        tpl('Resolvidos', resolvidos, 'Últimos registros', 'check-circle-2'),
+        tpl('SLA OK', `${slaOK}/${total||1}`, '1ª resposta ≤ 4h', 'clock'),
+      ].join('');
+      lucide.createIcons();
+    }
+
+    function renderTable(rows){
+      const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+      page = Math.min(page, totalPages);
+      const start = (page-1)*pageSize; const end = Math.min(page*pageSize, rows.length);
+      const pageRows = rows.slice(start, end);
+      $('#tbody').innerHTML = pageRows.map(t=>`
+        <tr class="border-b border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50/60 dark:hover:bg-zinc-800/40">
+          <td class="py-3 px-3 font-medium text-zinc-800 dark:text-zinc-100">${t.id}</td>
+          <td class="py-3 px-3 text-zinc-700 dark:text-zinc-300">${t.title}</td>
+          <td class="py-3 px-3"><span class="inline-flex items-center px-2 py-0.5 text-xs font-medium border rounded-full ${statusClass(t.status)}">${t.status}</span></td>
+          <td class="py-3 px-3"><span class="inline-flex items-center px-2 py-0.5 text-xs font-medium border rounded-full ${priorityClass(t.priority)}">${t.priority}</span></td>
+          <td class="py-3 px-3">${t.assignee}</td>
+          <td class="py-3 px-3">${t.channel}</td>
+          <td class="py-3 px-3">${t.createdAt}</td>
+          <td class="py-3 px-3">${t.updatedAt}</td>
+          <td class="py-3 px-3">${t.slaHours}</td>
+        </tr>
+      `).join('');
+      $('#pagingText').textContent = rows.length ? `Mostrando ${start+1}-${end} de ${rows.length}` : '0 resultados';
+      $('#pageInfo').textContent = `${page}/${totalPages}`;
+      $('#prev').disabled = page===1; $('#next').disabled = page===totalPages;
+    }
+
+    // ===== Charts =====
+    let chartStatus, chartDay;
+    function renderCharts(rows){
+      const byStatus = rows.reduce((acc,t)=>{ acc[t.status]=(acc[t.status]||0)+1; return acc; },{});
+      const statusLabels = Object.keys(byStatus);
+      const statusValues = Object.values(byStatus);
+
+      const byDayMap = new Map();
+      rows.forEach(t=>{
+        const d = t.createdAt;
+        const obj = byDayMap.get(d) || { day: d, criados: 0, resolvidos: 0 };
+        obj.criados += 1;
+        if(t.status === 'Resolvido') obj.resolvidos += 1;
+        byDayMap.set(d, obj);
+      });
+      const byDay = Array.from(byDayMap.values()).sort((a,b)=>a.day.localeCompare(b.day));
+
+      // Destroy previous
+      chartStatus && chartStatus.destroy();
+      chartDay && chartDay.destroy();
+
+      chartStatus = new Chart($('#chartStatus'), {
+        type: 'bar',
+        data: { labels: statusLabels, datasets: [{ label: 'Tickets', data: statusValues, borderRadius: 6 }] },
+        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision:0 }}}}
+      });
+
+      chartDay = new Chart($('#chartDay'), {
+        type: 'line',
+        data: { labels: byDay.map(x=>x.day), datasets: [
+          { label: 'Criados', data: byDay.map(x=>x.criados), tension:.4, borderWidth:2 },
+          { label: 'Resolvidos', data: byDay.map(x=>x.resolvidos), tension:.4, borderWidth:2 }
+        ]},
+        options: { responsive: true, scales: { y: { beginAtZero: true, ticks: { precision:0 }}}}
+      });
+    }
+
+    // ===== Export CSV =====
+    function exportCSV(rows){
+      const headers = ['id','title','status','priority','assignee','channel','createdAt','updatedAt','slaHours','timeToFirstResponseHrs','tags'];
+      const data = rows.map(t=>[
+        t.id,
+        '"'+String(t.title).replaceAll('"','""')+'"',
+        t.status, t.priority, t.assignee, t.channel,
+        t.createdAt, t.updatedAt, t.slaHours, t.timeToFirstResponseHrs,
+        '"'+(t.tags||[]).join('|')+'"'
+      ].join(','));
+      const csv = [headers.join(','), ...data].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `tickets_export_${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    }
+
+    // ===== Wire-up =====
+    function refresh(){
+      const rows = applyFilters();
+      renderKPIs(rows);
+      renderCharts(rows);
+      renderTable(rows);
+      const teamSize = unique(rows.map(t=>t.assignee)).length;
+      $('#teamSummary').innerHTML = `Equipe ativa: ${teamSize} <i data-lucide="users" class="inline w-3 h-3 ml-1"></i>`;
+      lucide.createIcons();
+    }
+
+    function reset(){
+      $('#q').value = filters.status = filters.priority = filters.startDate = filters.endDate = '';
+      query = '';
+      page = 1; refresh();
+    }
+
+    // Events
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      $('#q').addEventListener('input', (e)=>{ query = e.target.value; page=1; refresh(); });
+      $('#fStatus').addEventListener('change', (e)=>{ filters.status = e.target.value; page=1; refresh(); });
+      $('#fPriority').addEventListener('change', (e)=>{ filters.priority = e.target.value; page=1; refresh(); });
+      $('#fStart').addEventListener('change', (e)=>{ filters.startDate = e.target.value; page=1; refresh(); });
+      $('#fEnd').addEventListener('change', (e)=>{ filters.endDate = e.target.value; page=1; refresh(); });
+      $('#btnExport').addEventListener('click', ()=> exportCSV(applyFilters()));
+      $('#btnReset').addEventListener('click', reset);
+      $('#prev').addEventListener('click', ()=>{ if(page>1){ page--; refresh(); }});
+      $('#next').addEventListener('click', ()=>{ page++; refresh(); });
+      refresh();
+    });
+  </script>
+</body>
+</html>
