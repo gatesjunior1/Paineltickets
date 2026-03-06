@@ -579,5 +579,38 @@
   document.getElementById('next').addEventListener('click', () => { page++; renderTable(); });
 
 </script>
+
+<script>
+/* ===== Persistência global de dados ===== */
+const STORAGE_KEY = "novetech_dashboard_tickets";
+
+function saveTickets(tickets){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tickets));
+  }catch(e){}
+}
+
+function loadSavedTickets(){
+  try{
+    const d = localStorage.getItem(STORAGE_KEY);
+    if(d){ return JSON.parse(d); }
+  }catch(e){}
+  return null;
+}
+
+/* aplicar dados salvos ao abrir */
+window.addEventListener("DOMContentLoaded",()=>{
+  const saved = loadSavedTickets();
+  if(saved && Array.isArray(saved)){
+     const el = document.getElementById("tickets-data");
+     if(el){
+        el.textContent = JSON.stringify(saved);
+     }
+     if(typeof loadData === "function") loadData();
+     if(typeof refresh === "function") refresh();
+  }
+});
+</script>
+
 </body>
 </html>
